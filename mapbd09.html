@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenLayers加载离线百度地图</title>
+    <!-- 引入OpenLayers和样式 https://cdn.jsdelivr.net/npm/ol@v8.2.0/dist/ol.js || https://cdn.jsdelivr.net/npm/ol@v8.2.0/ol.css-->
+    <script src="./ol/ol.js"></script>
+    <link rel="stylesheet" href="./ol/ol.css" />
+
+    <script src="./bd09.js"></script>
+
+</head>
+
+<body>
+    <style>
+        body {
+            margin: 0px;
+            width: 100%;
+            height: 100vh;
+            position: relative;
+            background-color: #f5f3f0;
+        }
+
+        .flex {
+            width: 100%;
+            height: 100vh;
+            position: absolute;
+            top: 0px;
+            left: 0px;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background-color: #f5f5f5a8;
+            z-index: 4;
+        }
+
+        .loading {
+            width: 30px;
+            height: 30px;
+            border: 3px solid #477599;
+            border-top-color: transparent;
+            border-radius: 100%;
+
+            animation: circle infinite 0.75s linear;
+        }
+
+        .zoom-percentage {
+            position: absolute;
+            z-index: 1;
+            left: 10px;
+            top: 60px;
+        }
+
+        @keyframes circle {
+            0% {
+                transform: rotate(0);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+    <div id="map" style="width: 100%; height: 100vh"></div>
+    <div id="loading" class="flex">
+        <div class="loading"></div>
+    </div>
+    <script>
+        document.body.scrollTop = 0;
+        // 自定义分辨率和瓦片坐标系
+        var resolutions = [];
+        var maxZoom = 18;
+        var currentZoom = 5;
+        var fixedPixelCoordinate;
+        var center = [116.404, 39.915]; //北京
+
+        var projBD09 = new ol.proj.Projection({
+            code: 'BD:09',
+            extent: [-20037726.37, -11708041.66, 20037726.37, 12474104.17],
+            units: 'm',
+            axisOrientation: 'neu',
+            global: false
+        });
+        ol.proj.addProjection(projBD09);
+        ol.proj.addCoordinateTransforms("EPSG:4326", "BD:09",
+            function (coordinate) {
+                return lngLatToMercator(coordinate);
+            },
+            function (coordinate) {
+                return mercatorToLngLat(coordinate);
+            }
+        );
+        // 计算百度使用的分辨率
+        for (var i = 0; i <= maxZoom; i++) {
+            resolutions[i] = Math.pow(2, maxZoom - i);
+        }
+
+        var tilegrid = new ol.tilegrid.TileGrid({
+            origin: [0, 0],
+            resolutions: resolutions,
+        });
+
+        // 创建百度地图的数据源
+        var baiduSource = new ol.source.TileImage({
+            projection: "BD:09",
+            tileGrid: tilegrid,
+            tileUrlFunction: function (tileCoord, pixelRatio, proj) {
+                console.log(tileCoord);
+                var z = tileCoord[0];
+                var x = tileCoord[1];
+                var y = -tileCoord[2];
+
+                return (
+                    "http://online1.map.bdimg.com/onlinelabel/?qt=tile&x=" +
+                    x +
+                    "&y=" +
+                    y +
+                    "&z=" +
+                    z +
+                    "&styles=pl&scaler=1"
+                );
+                return "./package/tiles/" + z + "/" + x + "/" + y + ".jpeg";
+            },
+        });
+
+        var baiduLayer = new ol.layer.Tile({
+            source: baiduSource,
+        });
+
+        // 初始化地图
+        const map = new ol.Map({
+            target: "map",
+            layers: [
+                baiduLayer
+            ],
+            view: new ol.View({
+                projection: 'BD:09',
+                center: ol.proj.transform(formatCenter(center, currentZoom), 'EPSG:4326', 'BD:09'),
+                zoom: currentZoom,
+                maxZoom: maxZoom,
+                minZoom: -2,
+            }),
+        });
+
+        function formatCenter(params, currentZoom) {
+            // params[1] -= 8; 5 //4 16 3 32 2 64 1 128
+            // params[1] -= 4; 6
+            // params[1] -= 2; 7
+            // params[1] -= 1; 8
+            // params[1] -= 0.5; 9
+            params[1] -= 128 * Math.pow(2, -(currentZoom - 1));
+
+            // 根据缩放级别调整中心点的纬度
+            return params;
+        }
+
+
+
+
+        const scaleLineControl = new ol.control.ScaleLine();
+        map.addControl(scaleLineControl);
+
+        // 创建显示百分比的元素
+        const zoomPercentageElement = document.createElement("div");
+        zoomPercentageElement.className = "zoom-percentage";
+        document.body.appendChild(zoomPercentageElement);
+
+        // 监听变焦开始事件
+        map.on("pointerdown", function (evt) {
+            if (evt.originalEvent.touches?.length == 2) {
+                // 捏合手势开始，可以进行相应处理
+                console.log("Pinch gesture started");
+            }
+        });
+
+        // 监听变焦结束事件
+        map.on("pointerup", function (evt) {
+            if (evt.originalEvent.touches?.length < 2) {
+                // 捏合手势结束，可以进行相应处理
+                console.log("Pinch gesture ended");
+            }
+        });
+
+        // 监听变焦事件
+        map.on("pointermove", function (evt) {
+            // 获取鼠标所在位置的经纬度
+            var coordinate = evt.coordinate;
+            // 获取当前地图的缩放级别
+            fixedPixelCoordinate = evt.pixel; // 记录鼠标当前的像素坐标
+            if (evt.originalEvent.touches?.length == 2) {
+                // 捏合手势进行中，可以获取缩放比例等信息
+                var scaleDelta =
+                    map.getView().getZoom() - map.getView().getZoom(evt.coordinate);
+                console.log("Scale delta:", scaleDelta);
+            }
+        });
+
+        map.on("moveend", function () {
+
+            const zoomPercentage = Math.round(map.getView().getZoom());
+            zoomPercentageElement.innerHTML = `${zoomPercentage}%`;
+
+            if (fixedPixelCoordinate) {
+                // 将像素坐标转换为地图坐标
+                var fixedMapCoordinate =
+                    map.getCoordinateFromPixel(fixedPixelCoordinate);
+
+                if (
+                    fixedMapCoordinate &&
+                    fixedMapCoordinate[0] &&
+                    currentZoom !== map.getView().getZoom()
+                ) {
+                    currentZoom = map.getView().getZoom();
+                    map.getView().setCenter(fixedMapCoordinate);
+                }
+
+                fixedPixelCoordinate = null; // 重置记录的像素坐标
+            }
+        });
+
+        map.on("rendercomplete", function () {
+            // 处理地图加载完成的操作
+            document.getElementById("loading").style.display = "none";
+        });
+
+        baiduLayer.getSource().on('tileloadstart', function () {
+            document.getElementById("loading").style.display = "flex";
+        });
+
+    </script>
+</body>
+
+</html>
