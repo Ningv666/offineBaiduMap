@@ -185,7 +185,7 @@
         });
         map.on("moveend", function () {
 
-            const zoomPercentage = Math.round(map.getView().getZoom());
+            const zoomPercentage = Math.round(map.getView().getZoom() * 10);
             zoomPercentageElement.innerHTML = `${zoomPercentage}%`;
             if (fixedPixelCoordinate) {
                 // 将像素坐标转换为地图坐标
